@@ -6,28 +6,44 @@ on:
   pull_request:
     branches: [ main ]
 
+env:
+  PROJECT_SUBDIR: flask-ci-ecr
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - name: Show repo layout (debug)
+        run: |
+          echo "WORKSPACE: $(pwd)"
+          ls -la
+          echo "Contents of project subdir:"
+          ls -la ${{ env.PROJECT_SUBDIR }} || true
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install dependencies (inside subdir)
         run: |
+          cd ${{ env.PROJECT_SUBDIR }}
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest flake8
 
-      - name: Lint
-        run: flake8 --max-line-length=120 || true
-
-      - name: Run tests
+      - name: Lint (inside subdir)
         run: |
+          cd ${{ env.PROJECT_SUBDIR }}
+          flake8 --max-line-length=120 || true
+
+      - name: Run tests (inside subdir)
+        run: |
+          cd ${{ env.PROJECT_SUBDIR }}
+          echo "PWD: $(pwd)"
+          echo "PYTHONPATH before: $PYTHONPATH"
           PYTHONPATH=. pytest -q
 
   build-and-push:
@@ -43,13 +59,21 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
+      - name: Show repo layout (debug)
+        run: |
+          echo "WORKSPACE: $(pwd)"
+          ls -la
+          echo "Contents of project subdir:"
+          ls -la ${{ env.PROJECT_SUBDIR }} || true
+
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build, tag, and push image to ECR
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:${{ github.sha }}
+        run: |
+          cd ${{ env.PROJECT_SUBDIR }}
+          echo "Building from: $(pwd)"
+          # use docker build & docker push directly to avoid BuildKit warnings in some runners
+          docker build -t ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:${{ github.sha }} .
+          docker push ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:${{ github.sha }}
