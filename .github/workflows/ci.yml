@@ -27,7 +27,8 @@ jobs:
         run: flake8 --max-line-length=120 || true
 
       - name: Run tests
-        run: pytest -q
+        run: |
+          PYTHONPATH=. pytest -q
 
   build-and-push:
     needs: test
