@@ -2,55 +2,50 @@ name: CI & Build → ECR
 
 on:
   push:
-    branches: [ main ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ main ]
-
-env:
-  PROJECT_SUBDIR: flask-ci-ecr
+    branches: [ "main" ]
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Show repo layout (debug)
+      - name: Show repo (debug)
         run: |
-          echo "WORKSPACE: $(pwd)"
+          echo "RUNNER WORKDIR: $GITHUB_WORKSPACE"
           ls -la
-          echo "Contents of project subdir:"
-          ls -la ${{ env.PROJECT_SUBDIR }} || true
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      - name: Install dependencies (inside subdir)
+      - name: Install dependencies
         run: |
-          cd ${{ env.PROJECT_SUBDIR }}
+          # ensure we are in repo root
+          pwd
+          ls -la
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest flake8
 
-      - name: Lint (inside subdir)
+      - name: Run tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
-          cd ${{ env.PROJECT_SUBDIR }}
-          flake8 --max-line-length=120 || true
-
-      - name: Run tests (inside subdir)
-        run: |
-          cd ${{ env.PROJECT_SUBDIR }}
-          echo "PWD: $(pwd)"
-          echo "PYTHONPATH before: $PYTHONPATH"
-          PYTHONPATH=. pytest -q
+          pwd
+          echo "PYTHONPATH=$PYTHONPATH"
+          pytest -q
 
   build-and-push:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
@@ -59,21 +54,19 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Show repo layout (debug)
-        run: |
-          echo "WORKSPACE: $(pwd)"
-          ls -la
-          echo "Contents of project subdir:"
-          ls -la ${{ env.PROJECT_SUBDIR }} || true
-
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build, tag, and push image to ECR
+      - name: Build Docker image
         run: |
-          cd ${{ env.PROJECT_SUBDIR }}
-          echo "Building from: $(pwd)"
-          # use docker build & docker push directly to avoid BuildKit warnings in some runners
-          docker build -t ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:${{ github.sha }} .
-          docker push ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:${{ github.sha }}
+          # build from repo root (where Dockerfile lives)
+          docker build -t flask-ci-ecr:latest .
+
+      - name: Tag & push image to ECR
+        run: |
+          REGISTRY=${{ steps.login-ecr.outputs.registry }}
+          IMAGE_NAME=${{ secrets.ECR_REPOSITORY }}
+          TAG=${{ github.sha }}
+          docker tag flask-ci-ecr:latest ${REGISTRY}/${IMAGE_NAME}:${TAG}
+          docker push ${REGISTRY}/${IMAGE_NAME}:${TAG}
