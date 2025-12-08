@@ -5,11 +5,7 @@ This repository demonstrates a simple CI/CD pipeline that runs tests, builds a D
 
 ---
 
-## Architecture Diagram
 
-![Pipeline Diagram](project 1.png)
-
----
 
 ## Project Summary
 
